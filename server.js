@@ -4,8 +4,15 @@ import { extractExcelData } from "./services/excelService.js";
 import { extractPdfChavesAsync } from "./services/pdfServices.js";
 import ExcelJS from "exceljs";
 import path from "path";
+import cors from "cors";
 
 const app = express();
+app.use(
+  cors({
+    origin: "https://lima-ferreira.github.io", // seu frontend hospedado
+    methods: ["GET", "POST"],
+  })
+);
 const PORT = process.env.PORT || 7070;
 
 // Rota de teste
