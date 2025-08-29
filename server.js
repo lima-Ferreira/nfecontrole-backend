@@ -41,12 +41,12 @@ app.post(
 );
 
 // Rota para download do Excel direto no navegador
-app.get("/api/download-excel", async (req, res) => {
+app.post("/api/download-excel", async (req, res) => {
   try {
-    const chavesFaltando = JSON.parse(req.query.data || "[]");
+    const { chavesFaltando } = req.body;
 
     if (!Array.isArray(chavesFaltando) || chavesFaltando.length === 0) {
-      return res.status(404).send("Nenhuma chave para exportar.");
+      return res.status(400).json({ error: "Nenhuma chave fornecida." });
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -66,6 +66,8 @@ app.get("/api/download-excel", async (req, res) => {
 
     chavesFaltando.forEach((item) => {
       const row = worksheet.addRow(item);
+
+      // Destacar canceladas
       if (item.autorizacao?.toLowerCase() === "cancelado") {
         row.eachCell((cell) => {
           cell.font = { color: { argb: "FFFF0000" } };
