@@ -69,10 +69,10 @@ app.post(
 // ================== ROTA PARA DOWNLOAD DO EXCEL VIA POST ================== //
 app.post("/api/download-excel", async (req, res) => {
   try {
-    const chavesFaltando = req.body.chavesFaltando || [];
+    const { chavesFaltando } = req.body;
 
     if (!Array.isArray(chavesFaltando) || chavesFaltando.length === 0) {
-      return res.status(400).send("Nenhuma chave fornecida");
+      return res.status(400).json({ error: "Nenhuma chave fornecida." });
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -92,6 +92,8 @@ app.post("/api/download-excel", async (req, res) => {
 
     chavesFaltando.forEach((item) => {
       const row = worksheet.addRow(item);
+
+      // Destacar canceladas
       if (item.autorizacao?.toLowerCase() === "cancelado") {
         row.eachCell((cell) => {
           cell.font = { color: { argb: "FFFF0000" } };
@@ -112,10 +114,9 @@ app.post("/api/download-excel", async (req, res) => {
     res.end();
   } catch (err) {
     console.error("Erro ao gerar Excel:", err);
-    res.status(500).send("Erro ao gerar Excel");
+    res.status(500).json({ error: "Erro ao gerar Excel." });
   }
 });
-
 // ================== INICIA O SERVIDOR ================== //
 const PORT = process.env.PORT || 7070;
 app.listen(PORT, () =>
