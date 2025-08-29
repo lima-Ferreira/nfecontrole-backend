@@ -1,35 +1,52 @@
 import express from "express";
 import cors from "cors";
-import session from "express-session";
+import { fileUpload } from "./files-uploads/file.js";
+import { extractExcelData } from "./services/excelService.js";
+import { extractPdfChavesAsync } from "./services/pdfServices.js";
 import ExcelJS from "exceljs";
 
 const app = express();
+app.use(cors());
+app.use(express.json());
 
-// Middleware
-app.use(cors()); // Permite requisições do frontend
-app.use(express.json()); // Para ler JSON no body
+// Rota de upload e comparação
+app.post(
+  "/api/upload",
+  fileUpload.fields([
+    { name: "excelFile", maxCount: 1 },
+    { name: "pdfFile", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const excelFile = req.files?.["excelFile"]?.[0];
+      const pdfFile = req.files?.["pdfFile"]?.[0];
 
-// Sessão (se você ainda quiser armazenar dados temporários)
-app.use(
-  session({
-    secret: "seu-segredo-aqui",
-    resave: false,
-    saveUninitialized: true,
-  })
+      if (!excelFile || !pdfFile) {
+        return res.status(400).json({ error: "Envie Excel e PDF." });
+      }
+
+      const arrExcel = extractExcelData(excelFile.path);
+      const arrPdf = await extractPdfChavesAsync(pdfFile.path);
+
+      const chavesFaltando = arrExcel.filter(
+        (item) => !arrPdf.includes(item.chave)
+      );
+
+      res.json({ chavesFaltando });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Erro ao processar arquivos." });
+    }
+  }
 );
 
-// Rota de teste da API
-app.get("/", (req, res) => {
-  res.send("API do NFE Controle rodando!");
-});
-
-// Rota para gerar Excel com POST
-app.post("/api/download-excel", async (req, res) => {
+// Rota para download do Excel direto no navegador
+app.get("/api/download-excel", async (req, res) => {
   try {
-    const chavesFaltando = req.body.chavesFaltando || [];
+    const chavesFaltando = JSON.parse(req.query.data || "[]");
 
     if (!Array.isArray(chavesFaltando) || chavesFaltando.length === 0) {
-      return res.status(400).json({ error: "Nenhuma chave fornecida" });
+      return res.status(404).send("Nenhuma chave para exportar.");
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -51,7 +68,7 @@ app.post("/api/download-excel", async (req, res) => {
       const row = worksheet.addRow(item);
       if (item.autorizacao?.toLowerCase() === "cancelado") {
         row.eachCell((cell) => {
-          cell.font = { color: { argb: "FFFF0000" } }; // vermelho
+          cell.font = { color: { argb: "FFFF0000" } };
         });
       }
     });
@@ -73,6 +90,5 @@ app.post("/api/download-excel", async (req, res) => {
   }
 });
 
-// Inicia o servidor
 const PORT = process.env.PORT || 7070;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
