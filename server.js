@@ -1,25 +1,15 @@
 import express from "express";
-import session from "express-session";
-import { fileUpload } from "./files-uploads/file.js";
-import { extractExcelData } from "./services/excelService.js";
-import { extractPdfChavesAsync } from "./services/pdfServices.js";
-import ExcelJS from "exceljs";
 import cors from "cors";
+import session from "express-session";
+import ExcelJS from "exceljs";
 
 const app = express();
 
-// ================== MIDDLEWARES ================== //
-app.use(express.json()); // para receber JSON no POST
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static("public"));
-app.use(
-  cors({
-    origin: "*", // ou coloque o domínio do frontend
-    methods: ["GET", "POST"],
-  })
-);
+// Middleware
+app.use(cors()); // Permite requisições do frontend
+app.use(express.json()); // Para ler JSON no body
 
-// Configura sessão
+// Sessão (se você ainda quiser armazenar dados temporários)
 app.use(
   session({
     secret: "seu-segredo-aqui",
@@ -28,57 +18,18 @@ app.use(
   })
 );
 
-// ================== ROTAS ================== //
-
-// Página inicial
+// Rota de teste da API
 app.get("/", (req, res) => {
-  const chavesFaltando = req.session.chavesFaltando || [];
-  res.render("home", { chavesFaltando });
+  res.send("API do NFE Controle rodando!");
 });
 
-// Página de resultados
-app.get("/nfe", (req, res) => {
-  const chavesFaltando = req.session.chavesFaltando || [];
-  res.render("nfe.ejs", { chavesFaltando });
-});
-
-// Upload de arquivos
-app.post(
-  "/upload",
-  fileUpload.fields([
-    { name: "excelFile", maxCount: 1 },
-    { name: "pdfFile", maxCount: 1 },
-  ]),
-  async (req, res) => {
-    try {
-      const excelPath = req.files["excelFile"][0].path;
-      const pdfPath = req.files["pdfFile"][0].path;
-
-      const arrExcel = extractExcelData(excelPath);
-      const arrPdf = await extractPdfChavesAsync(pdfPath);
-
-      // Compara e guarda chaves faltantes na sessão
-      const chavesFaltando = arrExcel.filter(
-        (item) => !arrPdf.includes(item.chave)
-      );
-
-      req.session.chavesFaltando = chavesFaltando;
-
-      res.redirect("/nfe");
-    } catch (err) {
-      console.error(err);
-      res.status(500).send("Erro ao processar arquivos.");
-    }
-  }
-);
-
-// ================== ROTA PARA DOWNLOAD DO EXCEL VIA POST ================== //
+// Rota para gerar Excel com POST
 app.post("/api/download-excel", async (req, res) => {
   try {
-    const { chavesFaltando } = req.body;
+    const chavesFaltando = req.body.chavesFaltando || [];
 
     if (!Array.isArray(chavesFaltando) || chavesFaltando.length === 0) {
-      return res.status(400).json({ error: "Nenhuma chave fornecida." });
+      return res.status(400).json({ error: "Nenhuma chave fornecida" });
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -98,11 +49,9 @@ app.post("/api/download-excel", async (req, res) => {
 
     chavesFaltando.forEach((item) => {
       const row = worksheet.addRow(item);
-
-      // Destacar canceladas
       if (item.autorizacao?.toLowerCase() === "cancelado") {
         row.eachCell((cell) => {
-          cell.font = { color: { argb: "FFFF0000" } };
+          cell.font = { color: { argb: "FFFF0000" } }; // vermelho
         });
       }
     });
@@ -123,8 +72,7 @@ app.post("/api/download-excel", async (req, res) => {
     res.status(500).json({ error: "Erro ao gerar Excel." });
   }
 });
-// ================== INICIA O SERVIDOR ================== //
+
+// Inicia o servidor
 const PORT = process.env.PORT || 7070;
-app.listen(PORT, () =>
-  console.log(`Servidor rodando na porta ${PORT}: http://localhost:${PORT}`)
-);
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
