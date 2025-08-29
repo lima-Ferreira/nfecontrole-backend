@@ -1,71 +1,79 @@
 import express from "express";
+import session from "express-session";
 import { fileUpload } from "./files-uploads/file.js";
 import { extractExcelData } from "./services/excelService.js";
 import { extractPdfChavesAsync } from "./services/pdfServices.js";
 import ExcelJS from "exceljs";
 import path from "path";
-import cors from "cors";
 
 const app = express();
+
+// ================== MIDDLEWARES ================== //
+app.use(express.json()); // para receber JSON no POST
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
+
+// Configura sessão
 app.use(
-  cors({
-    origin: "https://lima-ferreira.github.io", // seu frontend hospedado
-    methods: ["GET", "POST"],
+  session({
+    secret: "seu-segredo-aqui",
+    resave: false,
+    saveUninitialized: true,
   })
 );
-const PORT = process.env.PORT || 7070;
 
-// Rota de teste
+// ================== ROTAS ================== //
+
+// Página inicial
 app.get("/", (req, res) => {
-  res.send("API rodando");
+  const chavesFaltando = req.session.chavesFaltando || [];
+  res.render("home", { chavesFaltando });
 });
 
-// API para upload e processamento de arquivos
+// Página de resultados
+app.get("/nfe", (req, res) => {
+  const chavesFaltando = req.session.chavesFaltando || [];
+  res.render("nfe.ejs", { chavesFaltando });
+});
+
+// Upload de arquivos
 app.post(
-  "/api/upload",
+  "/upload",
   fileUpload.fields([
     { name: "excelFile", maxCount: 1 },
     { name: "pdfFile", maxCount: 1 },
   ]),
   async (req, res) => {
     try {
-      // Validação: arquivos enviados
-      const excelFile = req.files?.["excelFile"]?.[0];
-      const pdfFile = req.files?.["pdfFile"]?.[0];
+      const excelPath = req.files["excelFile"][0].path;
+      const pdfPath = req.files["pdfFile"][0].path;
 
-      if (!excelFile || !pdfFile) {
-        return res.status(400).json({
-          error: "É necessário enviar arquivos Excel e PDF.",
-        });
-      }
-
-      const excelPath = excelFile.path;
-      const pdfPath = pdfFile.path;
-
-      // Processamento dos arquivos
       const arrExcel = extractExcelData(excelPath);
       const arrPdf = await extractPdfChavesAsync(pdfPath);
 
+      // Compara e guarda chaves faltantes na sessão
       const chavesFaltando = arrExcel.filter(
         (item) => !arrPdf.includes(item.chave)
       );
 
-      res.json({ chavesFaltando });
+      req.session.chavesFaltando = chavesFaltando;
+
+      res.redirect("/nfe");
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "Erro ao processar arquivos." });
+      res.status(500).send("Erro ao processar arquivos.");
     }
   }
 );
 
-// API para download do Excel
-app.get("/api/download-excel", async (req, res) => {
+// ================== ROTA PARA DOWNLOAD DO EXCEL VIA POST ================== //
+app.post("/api/download-excel", async (req, res) => {
   try {
-    const { chavesFaltando } = req.query;
+    const chavesFaltando = req.body.chavesFaltando || [];
 
-    if (!chavesFaltando) return res.status(400).send("Nenhuma chave fornecida");
-
-    const arr = JSON.parse(decodeURIComponent(chavesFaltando));
+    if (!Array.isArray(chavesFaltando) || chavesFaltando.length === 0) {
+      return res.status(400).send("Nenhuma chave fornecida");
+    }
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Chaves Faltando");
@@ -82,11 +90,11 @@ app.get("/api/download-excel", async (req, res) => {
 
     worksheet.getRow(1).font = { bold: true };
 
-    arr.forEach((item) => {
+    chavesFaltando.forEach((item) => {
       const row = worksheet.addRow(item);
       if (item.autorizacao?.toLowerCase() === "cancelado") {
         row.eachCell((cell) => {
-          cell.font = { color: { argb: "FFFF0000" } }; // vermelho puro
+          cell.font = { color: { argb: "FFFF0000" } };
         });
       }
     });
@@ -103,9 +111,13 @@ app.get("/api/download-excel", async (req, res) => {
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Erro ao gerar o Excel.");
+    console.error("Erro ao gerar Excel:", err);
+    res.status(500).send("Erro ao gerar Excel");
   }
 });
 
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+// ================== INICIA O SERVIDOR ================== //
+const PORT = process.env.PORT || 7070;
+app.listen(PORT, () =>
+  console.log(`Servidor rodando na porta ${PORT}: http://localhost:${PORT}`)
+);
