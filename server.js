@@ -4,7 +4,7 @@ import { fileUpload } from "./files-uploads/file.js";
 import { extractExcelData } from "./services/excelService.js";
 import { extractPdfChavesAsync } from "./services/pdfServices.js";
 import ExcelJS from "exceljs";
-import path from "path";
+import cors from "cors";
 
 const app = express();
 
@@ -12,6 +12,12 @@ const app = express();
 app.use(express.json()); // para receber JSON no POST
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
+app.use(
+  cors({
+    origin: "*", // ou coloque o domínio do frontend
+    methods: ["GET", "POST"],
+  })
+);
 
 // Configura sessão
 app.use(
