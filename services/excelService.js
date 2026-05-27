@@ -10,7 +10,7 @@ function extractExcelData(excelPath) {
   const firstSheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[firstSheetName];
   
-  // Transforma em matriz pura para evitar problemas com vírgulas nos nomes dos fornecedores
+  // Transforma em matriz pura para ignorar as vírgulas dentro do nome do fornecedor
   const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
   const extractedData = [];
@@ -21,35 +21,30 @@ function extractExcelData(excelPath) {
   };
 
   rows.forEach((columns) => {
-    // Pula linhas vazias ou sem dados suficientes
-    if (!columns || columns.length < 4) return;
+    if (!columns || columns.length < 5) return;
 
-    // Buscando as informações nas colunas corretas do novo formato do SIGA
-    const noteData = {
-      dataTempo: limparCampo(columns[0]),   // Primeira coluna onde está vindo a data ou fornecedor
-      uf: limparCampo(columns[1]),          // Segunda coluna onde está vindo a UF ou Situação
-      numDoc: limparCampo(columns[2]),      // Terceira coluna onde está vindo o Documento
-      chave: limparCampo(columns[3]),       // Quarta coluna onde está vindo a Chave de 44 dígitos
-      fornecedor: limparCampo(columns[4]),  // Quinta coluna
-      autorizacao: limparCampo(columns[5]), // Sexta coluna
-      valorDoDoc: limparCampo(columns[6]),  // Sétima coluna
-    };
-
-    // Caso a chave de 44 dígitos venha deslocada em outra coluna, fazemos uma varredura para garantir
-    if (noteData.chave.length !== 44) {
-      const chaveEncontrada = columns.find(cell => {
-        const limpo = limparCampo(cell);
-        return limpo.length === 44 && !isNaN(limpo);
-      });
-      if (chaveEncontrada) {
-        noteData.chave = limparCampo(chaveEncontrada);
+    // Procura dinamicamente a chave de 44 dígitos na linha caso ela mude de lugar
+    let chaveReal = "";
+    columns.forEach((cell) => {
+      const limpo = limparCampo(cell);
+      if (limpo.length === 44 && !isNaN(limpo)) {
+        chaveReal = limpo;
       }
-    }
+    });
 
-    // Regra rígida de validação: Só aceita se for uma Chave de Acesso válida de 44 números
-    if (!noteData.chave || noteData.chave.length !== 44 || isNaN(noteData.chave)) {
-      return;
-    }
+    // Se não encontrou uma chave de acesso válida de NF-e na linha, pula ela
+    if (!chaveReal) return;
+
+    // MAPEAMENTO CORRIGIDO PARA O SIGA (Índices reais da matriz)
+    const noteData = {
+      dataTempo: limparCampo(columns[0]),   // Coluna A (Geralmente Data ou Fornecedor no SIGA)
+      uf: limparCampo(columns[1]),          // Coluna B (Geralmente UF ou Status)
+      numDoc: limparCampo(columns[2]),      // Coluna C (Número do Documento)
+      chave: chaveReal,                    // Chave de 44 dígitos encontrada dinamicamente
+      fornecedor: limparCampo(columns[4]),  // Coluna E
+      autorizacao: limparCampo(columns[5]), // Coluna F
+      valorDoDoc: limparCampo(columns[6]),  // Coluna G
+    };
 
     extractedData.push(noteData);
   });
