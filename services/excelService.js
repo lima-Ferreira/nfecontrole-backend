@@ -5,11 +5,10 @@ function extractExcelData(excelPath) {
     throw new Error("Arquivo não encontrado!");
   }
 
-  // Lê o arquivo do SIGA como texto puro
   const content = fs.readFileSync(excelPath, "utf-8");
   const rows = content.split(/\r?\n/);
 
-  const extractedData = [];
+  let extractedData = [];
 
   const limparCampo = (texto) => {
     if (!texto) return "";
@@ -19,10 +18,8 @@ function extractExcelData(excelPath) {
   rows.forEach((row) => {
     if (!row || !row.trim()) return;
 
-    // Se for linha de título da Sefaz, pula
     if (row.includes("Razão Social") || row.includes("Chave NF-e")) return;
 
-    // Divide a linha pelas vírgulas normais do CSV
     const columns = row.includes(";") ? row.split(";") : row.split(",");
 
     let chaveReal = "";
@@ -32,55 +29,54 @@ function extractExcelData(excelPath) {
     let valorReal = "";
     let ufReal = "CE";
 
-    // Varre todos os campos da linha procurando a chave de 44 números
     columns.forEach((cell, index) => {
       const limpo = limparCampo(cell);
       
-      // Encontrou a chave de acesso!
+      // Identifica a Chave de Acesso
       if (limpo.length === 44 && !isNaN(limpo)) {
         chaveReal = limpo;
 
-        // No padrão do SIGA, mapeamos os dados contando a partir do começo da linha:
-        // O Fornecedor costuma ficar na coluna 1 ou 2
-        fornecedorReal = columns[1] ? limparCampo(columns[1]) : "";
-        
-        // Se o nome do fornecedor tiver vírgula e quebrou em dois, junta de volta com a coluna 2
-        if (columns[2] && isNaN(limparCampo(columns[2])) && limparCampo(columns[2]).length > 2) {
-          if (limparCampo(columns[2]).length > 5 && !limparCampo(columns[2]).match(/^[A-Z]{2}$/)) {
-            fornecedorReal += " " + limparCampo(columns[2]);
+        // Captura o fornecedor na primeira coluna preenchida
+        fornecedorReal = columns ? limparCampo(columns) : "";
+        if (columns && isNaN(limparCampo(columns)) && limparCampo(columns).length > 2) {
+          if (limparCampo(columns).length > 5 && !limparCampo(columns).match(/^[A-Z]{2}$/)) {
+            fornecedorReal += " " + limparCampo(columns);
           }
         }
 
-        // Procura a UF (campo com 2 letras maiúsculas ex: CE, PE, SP) nas primeiras colunas
-        for (let i = 2; i < 5; i++) {
+        // Procura a UF (2 letras maiúsculas)
+        for (let i = 1; i < 5; i++) {
           if (columns[i] && limparCampo(columns[i]).match(/^[A-Z]{2}$/)) {
             ufReal = limparCampo(columns[i]);
             break;
           }
         }
 
-        // Pega o Número do Documento (geralmente vem algumas colunas antes da chave)
-        if (columns[index - 4]) numeroDocReal = limparCampo(columns[index - 4]);
-
-        // Busca a Data (formato DD/MM/AAAA ou similar) na linha
-        const campoData = columns.find(c => limparCampo(c).match(/\d{2}\/\d{2}\/\d{4}/));
-        dataReal = campoData ? limparCampo(campoData) : "Disponível no SIGA";
-
-        // Busca o Valor R$ (procura um campo que tenha formato de dinheiro ou vírgula decimal perto do fim)
-        if (columns[index - 1]) {
-          const possivelValor = limparCampo(columns[index - 1]);
-          if (possivelValor.includes(",") || !isNaN(possivelValor.replace(".", ""))) {
-            valorReal = possivelValor;
+        // Captura o Número do Documento correto (Procura um número menor isolado que não seja data)
+        for (let i = index - 1; i >= 0; i--) {
+          const c = limparCampo(columns[i]);
+          if (c && !isNaN(c) && c.length <= 9 && c.length > 0) {
+            numeroDocReal = c;
+            break;
           }
         }
-        
-        if (!valorReal && columns[index - 2]) {
-          valorReal = limparCampo(columns[index - 2]);
+
+        // Busca a Data de Emissão (formato DD/MM/AAAA)
+        const campoData = columns.find(c => limparCampo(c).match(/^\d{2}\/\d{2}\/\d{4}$/));
+        dataReal = campoData ? limparCampo(campoData) : "";
+
+        // Pega o Valor Real da Nota (Geralmente vem logo após os indicadores/data)
+        for (let i = index - 1; i >= 2; i--) {
+          const v = limparCampo(columns[i]);
+          // Verifica se o campo tem cara de valor (ex: 150.00 ou 150,00 ou números com decimais)
+          if (v && (v.includes(",") || v.includes(".") || !isNaN(v)) && v.length > 2 && v !== numeroDocReal && !v.includes("/")) {
+            valorReal = v;
+            break;
+          }
         }
       }
     });
 
-    // Se achou uma chave válida de 44 dígitos, salva no sistema com os dados reais extraídos!
     if (chaveReal && chaveReal.length === 44) {
       extractedData.push({
         dataTempo: dataReal || "Ver no SIGA",
@@ -89,9 +85,23 @@ function extractExcelData(excelPath) {
         chave: chaveReal,
         fornecedor: fornecedorReal || "Fornecedor",
         autorizacao: "AUTORIZADA",
-        valorDoDoc: valorReal || "Ver no SIGA",
+        valorDoDoc: valorReal || "0,00",
       });
     }
+  });
+
+  // 🗓️ ORDENAÇÃO POR DATA DECRESCENTE (Mais recente para a mais antiga)
+  extractedData.sort((a, b) => {
+    if (a.dataTempo.includes("/") && b.dataTempo.includes("/")) {
+      const [diaA, mesA, anoA] = a.dataTempo.split("/");
+      const [diaB, mesB, anoB] = b.dataTempo.split("/");
+      
+      const dataFormatadaA = new Date(`${anoA}-${mesA}-${diaA}`);
+      const dataFormatadaB = new Date(`${anoB}-${mesB}-${diaB}`);
+      
+      return dataFormatadaB - dataFormatadaA; // Decrescente
+    }
+    return 0;
   });
 
   return extractedData;
