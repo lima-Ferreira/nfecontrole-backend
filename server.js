@@ -6,11 +6,13 @@ import { extractPdfChavesAsync } from "./services/pdfServices.js";
 import ExcelJS from "exceljs";
 
 const app = express();
+// Libera o acesso para o front local e para o front do GitHub Pages
 app.use(cors({
-  origin: ["http://127.0.0.1:5500", "http://localhost:5500"],
+  origin: "*", 
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"]
 }));
+
 app.use(express.json());
 
 // Rota de upload e comparação
