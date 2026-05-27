@@ -6,7 +6,11 @@ import { extractPdfChavesAsync } from "./services/pdfServices.js";
 import ExcelJS from "exceljs";
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: ["http://127.0.0.1:5500", "http://localhost:5500"],
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"]
+}));
 app.use(express.json());
 
 // Rota de upload e comparação
@@ -92,5 +96,5 @@ app.post("/api/download-excel", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 7070;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
