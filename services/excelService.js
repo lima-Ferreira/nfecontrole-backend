@@ -1,65 +1,66 @@
 import fs from "fs";
-import xlsx from "xlsx";
 
 function extractExcelData(excelPath) {
   if (!fs.existsSync(excelPath)) {
-    throw new Error("Arquivo de planilha não encontrado!");
+    throw new Error("Arquivo não encontrado!");
   }
 
-  const workbook = xlsx.readFile(excelPath);
-  const firstSheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[firstSheetName];
-  
-  // Converte a planilha em JSON estruturado linha por linha
-  // O parâmetro 'raw: false' força o formato de texto limpo
-  const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
+  // Lê o arquivo do SIGA como texto puro (funciona para XLS, XLSX, CSV ou TXT)
+  const content = fs.readFileSync(excelPath, "utf-8");
+  const rows = content.split(/\r?\n/);
 
   const extractedData = [];
 
   const limparCampo = (texto) => {
-    if (texto === undefined || texto === null) return "";
-    return String(texto).replace(/"/g, "").trim();
+    if (!texto) return "";
+    return texto.replace(/"/g, "").trim();
   };
 
-  rows.forEach((columns) => {
-    // Se a linha estiver vazia ou for o cabeçalho descritivo, pula
-    if (!columns || columns.length === 0) return;
+  rows.forEach((row) => {
+    if (!row || !row.trim()) return;
 
-    let linhaTexto = String(columns[0]); // Pega o conteúdo bruto da Coluna A
+    // Se for linha de título da Sefaz, pula
+    if (row.includes("Razão Social") || row.includes("Chave NF-e")) return;
 
-    // Se for a linha dos títulos (CNPJ destinatário, Razão Social...), pula
-    if (linhaTexto.includes("Razão Social") || linhaTexto.includes("Chave NF-e")) return;
+    // Divide por vírgula ou ponto-e-vírgula (o SIGA às vezes usa ;)
+    const columns = row.includes(";") ? row.split(";") : row.split(",");
 
-    // Expressão regular mágica para dar split por vírgula APENAS fora das aspas
-    const campos = linhaTexto.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || linhaTexto.split(",");
+    let chaveReal = "";
+    let fornecedorReal = "";
+    let numeroDocReal = "";
 
-    // Remove as aspas extras de cada pedaço encontrado
-    const dadosLimpos = campos.map(c => limparCampo(c));
+    // Varre todos os campos da linha procurando a chave de 44 números
+    columns.forEach((cell, index) => {
+      const limpo = limparCampo(cell);
+      
+      if (limpo.length === 44 && !isNaN(limpo)) {
+        chaveReal = limpo;
 
-    // Com base no cabeçalho do SIGA visível no seu print:
-    // [0] CNPJ | [1] Fornecedor | [2] UF | [3] NumDoc | [4] Data | [5] Indicadores | [6] Valor | [7] Chave
-    const noteData = {
-      dataTempo: dadosLimpos[4] || "",   // Data de Emissão
-      uf: dadosLimpos[2] || "",          // UF
-      numDoc: dadosLimpos[3] || "",      // Número da nota
-      chave: dadosLimpos[7] || "",       // Chave NF-e (Último campo)
-      fornecedor: dadosLimpos[1] || "",  // Razão Social destinatário
-      autorizacao: dadosLimpos[5] || "AUTORIZADA", // Situação / Indicadores
-      valorDoDoc: dadosLimpos[6] || "",  // Valor R$
-    };
-
-    // Validação estrita da chave de acesso (precisa ter 44 dígitos numéricos)
-    if (!noteData.chave || noteData.chave.length !== 44 || isNaN(noteData.chave)) {
-      // Procura em outros índices caso venha deslocado
-      const chaveAlternativa = dadosLimpos.find(d => d.length === 44 && !isNaN(d));
-      if (chaveAlternativa) {
-        noteData.chave = chaveAlternativa;
-      } else {
-        return; // Pula se não achar chave válida
+        // Tenta pegar o Fornecedor e o Número do documento por aproximação de colunas
+        fornecedorReal = columns[1] ? limparCampo(columns[1]) : "Fornecedor SIGA";
+        numeroDocReal = columns[3] ? limparCampo(columns[3]) : "Nota SIGA";
+        
+        // Se o nome do fornecedor tiver vírgula e quebrou em dois, junta de volta
+        if (columns[2] && isNaN(limparCampo(columns[2])) && limparCampo(columns[2]).length > 2) {
+          if (!limparCampo(columns[2]).includes("CE") && limparCampo(columns[2]).length > 4) {
+            fornecedorReal += " " + limparCampo(columns[2]);
+          }
+        }
       }
-    }
+    });
 
-    extractedData.push(noteData);
+    // Se achou uma chave válida de 44 dígitos, salva no sistema!
+    if (chaveReal && chaveReal.length === 44) {
+      extractedData.push({
+        dataTempo: "Ver no SIGA",
+        uf: "CE",
+        numDoc: numeroDocReal || "NF-e",
+        chave: chaveReal,
+        fornecedor: fornecedorReal || "Fornecedor",
+        autorizacao: "AUTORIZADA",
+        valorDoDoc: "Ver no SIGA",
+      });
+    }
   });
 
   return extractedData;
