@@ -8,44 +8,47 @@ function extractExcelData(excelPath) {
 
   const workbook = xlsx.readFile(excelPath);
   const firstSheetName = workbook.SheetNames[0];
-  const csvData = xlsx.utils.sheet_to_csv(workbook.Sheets[firstSheetName]);
-  const rows = csvData.split("\n");
+  const sheet = workbook.Sheets[firstSheetName];
+  
+  // Lê o Excel como uma matriz real de dados (evita quebra por vírgulas no texto)
+  const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
   const extractedData = [];
 
-  // Função para remover as aspas duplicadas que o SIGA gera
   const limparCampo = (texto) => {
-    if (!texto) return "";
-    return texto.replace(/"/g, "").trim();
+    if (texto === undefined || texto === null) return "";
+    return String(texto).replace(/"/g, "").trim();
   };
 
-  rows.forEach((row) => {
-    if (!row.trim()) return;
+  rows.forEach((columns) => {
+    if (!columns || columns.length < 2) return;
 
-    const columns = row.split(",");
-
-    // Reorganização baseada no novo layout do SIGA que vimos no seu print
+    // Mapeamento baseado estritamente na ordem em que os dados apareceram na sua tabela
     const noteData = {
-      dataTempo: limparCampo(columns[1]),   // Ajuste se a data mudou de lugar na planilha
-      uf: limparCampo(columns[5]),          
-      numDoc: limparCampo(columns[6]),      
-      chave: limparCampo(columns[1]),       // No print, a chave veio parar onde era a coluna do documento
-      fornecedor: limparCampo(columns[0]),  // No print, o fornecedor veio parar na primeira coluna (onde era a data)
-      autorizacao: limparCampo(columns[2]), // No print, a situação veio parar onde era a UF
-      valorDoDoc: limparCampo(columns[7]),  // Ajuste estimado para o valor
+      dataTempo: limparCampo(columns[1]),   // Campo de data original (se houver)
+      uf: limparCampo(columns[5]),          // UF original
+      numDoc: limparCampo(columns[2]),      // Onde caiu o número do documento/valor
+      chave: limparCampo(columns[3]),       // Onde caiu a chave de 44 dígitos
+      fornecedor: limparCampo(columns[0]),  // Onde caiu a Razão Social/Fornecedor
+      autorizacao: limparCampo(columns[4]), // Onde caiu o status de AUTORIZADA
+      valorDoDoc: limparCampo(columns[6]),  // Onde caiu o valor final
     };
 
-    // Ajuste inteligente: Se o fornecedor veio na coluna 0 e a chave na coluna 1 (como no print quebrado):
-    if (columns[1] && columns[1].replace(/"/g, "").trim().length === 44) {
-      noteData.chave = limparCampo(columns[1]);
-      noteData.fornecedor = limparCampo(columns[0]);
-      noteData.autorizacao = limparCampo(columns[2]);
-      // Deixamos a data fixa ou tentamos buscar de outra coluna se o SIGA mudou ela de lugar
-      noteData.dataTempo = "Ver no SIGA"; 
+    // Ajuste dinâmico automático caso o SIGA inverta as posições das colunas:
+    let chaveReal = "";
+    columns.forEach((cell) => {
+      const limpo = limparCampo(cell);
+      if (limpo.length === 44 && !isNaN(limpo)) {
+        chaveReal = limpo;
+      }
+    });
+
+    if (chaveReal) {
+      noteData.chave = chaveReal;
     }
 
-    // Ignora linhas de cabeçalho ou sem chave válida
-    if (!noteData.chave || noteData.chave.toLowerCase().includes("chave") || noteData.chave.length < 20) {
+    // Ignora linhas de cabeçalho ou sem chave válida de NF-e
+    if (!noteData.chave || noteData.chave.length < 20 || noteData.chave.toLowerCase().includes("chave")) {
       return;
     }
 
