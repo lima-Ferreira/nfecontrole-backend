@@ -32,19 +32,16 @@ function extractExcelData(excelPath) {
     columns.forEach((cell, index) => {
       const limpo = limparCampo(cell);
       
-      // Identifica a Chave de Acesso
       if (limpo.length === 44 && !isNaN(limpo)) {
         chaveReal = limpo;
 
-        // Captura o fornecedor na primeira coluna preenchida
-        fornecedorReal = columns ? limparCampo(columns) : "";
-        if (columns && isNaN(limparCampo(columns)) && limparCampo(columns).length > 2) {
-          if (limparCampo(columns).length > 5 && !limparCampo(columns).match(/^[A-Z]{2}$/)) {
-            fornecedorReal += " " + limparCampo(columns);
+        fornecedorReal = columns[1] ? limparCampo(columns[1]) : "";
+        if (columns[2] && isNaN(limparCampo(columns[2])) && limparCampo(columns[2]).length > 2) {
+          if (limparCampo(columns[2]).length > 5 && !limparCampo(columns[2]).match(/^[A-Z]{2}$/)) {
+            fornecedorReal += " " + limparCampo(columns[2]);
           }
         }
 
-        // Procura a UF (2 letras maiúsculas)
         for (let i = 1; i < 5; i++) {
           if (columns[i] && limparCampo(columns[i]).match(/^[A-Z]{2}$/)) {
             ufReal = limparCampo(columns[i]);
@@ -52,7 +49,6 @@ function extractExcelData(excelPath) {
           }
         }
 
-        // Captura o Número do Documento correto (Procura um número menor isolado que não seja data)
         for (let i = index - 1; i >= 0; i--) {
           const c = limparCampo(columns[i]);
           if (c && !isNaN(c) && c.length <= 9 && c.length > 0) {
@@ -61,14 +57,11 @@ function extractExcelData(excelPath) {
           }
         }
 
-        // Busca a Data de Emissão (formato DD/MM/AAAA)
         const campoData = columns.find(c => limparCampo(c).match(/^\d{2}\/\d{2}\/\d{4}$/));
         dataReal = campoData ? limparCampo(campoData) : "";
 
-        // Pega o Valor Real da Nota (Geralmente vem logo após os indicadores/data)
         for (let i = index - 1; i >= 2; i--) {
           const v = limparCampo(columns[i]);
-          // Verifica se o campo tem cara de valor (ex: 150.00 ou 150,00 ou números com decimais)
           if (v && (v.includes(",") || v.includes(".") || !isNaN(v)) && v.length > 2 && v !== numeroDocReal && !v.includes("/")) {
             valorReal = v;
             break;
@@ -90,18 +83,31 @@ function extractExcelData(excelPath) {
     }
   });
 
-  // 🗓️ ORDENAÇÃO POR DATA DECRESCENTE (Mais recente para a mais antiga)
+  // 🗓️ ORDENAÇÃO POR DATA DECRESCENTE TOTALMENTE PROTEGIDA AGAINST CRASHES
   extractedData.sort((a, b) => {
-    if (a.dataTempo.includes("/") && b.dataTempo.includes("/")) {
-      const [diaA, mesA, anoA] = a.dataTempo.split("/");
-      const [diaB, mesB, anoB] = b.dataTempo.split("/");
-      
-      const dataFormatadaA = new Date(`${anoA}-${mesA}-${diaA}`);
-      const dataFormatadaB = new Date(`${anoB}-${mesB}-${diaB}`);
-      
-      return dataFormatadaB - dataFormatadaA; // Decrescente
+    try {
+      const temDataA = a.dataTempo && a.dataTempo.includes("/");
+      const temDataB = b.dataTempo && b.dataTempo.includes("/");
+
+      if (!temDataA && !temDataB) return 0;
+      if (!temDataA) return 1;  // Joga registros sem data válida para o fim
+      if (!temDataB) return -1; // Mantém registros com data no topo
+
+      const partesA = a.dataTempo.split("/");
+      const partesB = b.dataTempo.split("/");
+
+      if (partesA.length !== 3 || partesB.length !== 3) return 0;
+
+      const dataFormatadaA = new Date(`${partesA[2]}-${partesA[1]}-${partesA[0]}`);
+      const dataFormatadaB = new Date(`${partesB[2]}-${partesB[1]}-${partesB[0]}`);
+
+      // Verifica se a conversão gerou datas válidas antes de subtrair
+      if (isNaN(dataFormatadaA.getTime()) || isNaN(dataFormatadaB.getTime())) return 0;
+
+      return dataFormatadaB - dataFormatadaA; // Mais recentes primeiro
+    } catch (sortError) {
+      return 0; // Se falhar em alguma linha, não quebra a execução do servidor
     }
-    return 0;
   });
 
   return extractedData;
