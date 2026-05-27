@@ -10,7 +10,7 @@ function extractExcelData(excelPath) {
   const firstSheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[firstSheetName];
   
-  // Lê o Excel como uma matriz real de dados (evita quebra por vírgulas no texto)
+  // Transforma em matriz pura para evitar problemas com vírgulas nos nomes dos fornecedores
   const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
   const extractedData = [];
@@ -21,34 +21,33 @@ function extractExcelData(excelPath) {
   };
 
   rows.forEach((columns) => {
-    if (!columns || columns.length < 2) return;
+    // Pula linhas vazias ou sem dados suficientes
+    if (!columns || columns.length < 4) return;
 
-    // Mapeamento baseado estritamente na ordem em que os dados apareceram na sua tabela
+    // Buscando as informações nas colunas corretas do novo formato do SIGA
     const noteData = {
-      dataTempo: limparCampo(columns[1]),   // Campo de data original (se houver)
-      uf: limparCampo(columns[5]),          // UF original
-      numDoc: limparCampo(columns[2]),      // Onde caiu o número do documento/valor
-      chave: limparCampo(columns[3]),       // Onde caiu a chave de 44 dígitos
-      fornecedor: limparCampo(columns[0]),  // Onde caiu a Razão Social/Fornecedor
-      autorizacao: limparCampo(columns[4]), // Onde caiu o status de AUTORIZADA
-      valorDoDoc: limparCampo(columns[6]),  // Onde caiu o valor final
+      dataTempo: limparCampo(columns[0]),   // Primeira coluna onde está vindo a data ou fornecedor
+      uf: limparCampo(columns[1]),          // Segunda coluna onde está vindo a UF ou Situação
+      numDoc: limparCampo(columns[2]),      // Terceira coluna onde está vindo o Documento
+      chave: limparCampo(columns[3]),       // Quarta coluna onde está vindo a Chave de 44 dígitos
+      fornecedor: limparCampo(columns[4]),  // Quinta coluna
+      autorizacao: limparCampo(columns[5]), // Sexta coluna
+      valorDoDoc: limparCampo(columns[6]),  // Sétima coluna
     };
 
-    // Ajuste dinâmico automático caso o SIGA inverta as posições das colunas:
-    let chaveReal = "";
-    columns.forEach((cell) => {
-      const limpo = limparCampo(cell);
-      if (limpo.length === 44 && !isNaN(limpo)) {
-        chaveReal = limpo;
+    // Caso a chave de 44 dígitos venha deslocada em outra coluna, fazemos uma varredura para garantir
+    if (noteData.chave.length !== 44) {
+      const chaveEncontrada = columns.find(cell => {
+        const limpo = limparCampo(cell);
+        return limpo.length === 44 && !isNaN(limpo);
+      });
+      if (chaveEncontrada) {
+        noteData.chave = limparCampo(chaveEncontrada);
       }
-    });
-
-    if (chaveReal) {
-      noteData.chave = chaveReal;
     }
 
-    // Ignora linhas de cabeçalho ou sem chave válida de NF-e
-    if (!noteData.chave || noteData.chave.length < 20 || noteData.chave.toLowerCase().includes("chave")) {
+    // Regra rígida de validação: Só aceita se for uma Chave de Acesso válida de 44 números
+    if (!noteData.chave || noteData.chave.length !== 44 || isNaN(noteData.chave)) {
       return;
     }
 
