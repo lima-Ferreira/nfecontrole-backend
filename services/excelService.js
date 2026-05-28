@@ -1,82 +1,58 @@
 import fs from "fs";
+import xlsx from "xlsx";
 
 function extractExcelData(excelPath) {
   if (!fs.existsSync(excelPath)) {
-    throw new Error("Arquivo não encontrado!");
+    throw new Error("Arquivo de planilha não encontrado!");
   }
 
-  const content = fs.readFileSync(excelPath, "utf-8");
-  const rows = content.split(/\r?\n/);
+  // 1. Força a leitura do arquivo tratando absolutamente TUDO como texto bruto (String)
+  // Isso impede chaves com "e+43", preserva as datas e mantém os valores originais!
+  const workbook = xlsx.readFile(excelPath, { codepage: 65001 });
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheetName];
+  
+  // O parâmetro raw: false força a biblioteca a trazer o texto formatado visual da célula
+  const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false });
 
-  let extractedData = [];
+  const extractedData = [];
 
-  const limparCampo = (texto) => {
-    if (!texto) return "";
-    return texto.replace(/"/g, "").trim();
-  };
+  rows.forEach((columns) => {
+    if (!columns || columns.length === 0) return;
 
-  rows.forEach((row) => {
-    if (!row || !row.trim()) return;
+    // Transforma a linha em texto corrido para limpar aspas que o SIGA injeta
+    const rowString = columns.join(",");
+    if (rowString.includes("CNPJ destina") || rowString.includes("Chave NF-e")) return;
 
-    if (row.includes("Razão Social") || row.includes("Chave NF-e")) return;
+    // Remove as aspas sobressalentes de cada campo obtido
+    const cleanCells = columns.map(cell => cell ? String(cell).replace(/^"|"$/g, "").trim() : "");
 
-    const columns = row.includes(";") ? row.split(";") : row.split(",");
+    // Mapeamento baseado nos índices que vimos no seu log do terminal:
+    // [0]:CNPJ | [1]:Razão | [2]:UF | [3]:Nota | [4]:Data | [5]:Status | [6]:Valor | [7]:Chave
+    const statusBruto = cleanCells[5] || ""; 
+    
+    let statusNormalizado = statusBruto;
+    if (statusBruto.toLowerCase().includes("cancel") || statusBruto.toLowerCase().includes("inutil")) {
+      statusNormalizado = "cancelado";
+    }
 
-    let chaveReal = "";
-    let fornecedorReal = "";
-    let numeroDocReal = "";
-    let dataReal = "";
-    let valorReal = "";
-    let ufReal = "CE";
+    // Captura a chave limpando espaços extras
+    let chaveOriginal = cleanCells[7] || "";
+    chaveOriginal = chaveOriginal.replace(/\s/g, "");
 
-    columns.forEach((cell, index) => {
-      const limpo = limparCampo(cell);
-      
-      if (limpo.length === 44 && !isNaN(limpo)) {
-        chaveReal = limpo;
+    const noteData = {
+      dataTempo: cleanCells[4] || "",   // Data de emissão real
+      uf: cleanCells[2] || "",          // UF
+      numDoc: cleanCells[3] || "",      // Número da nota
+      chave: chaveOriginal,             // Chave NF-e (Agora com os 44 dígitos puros!)
+      fornecedor: cleanCells[1] || "",   // Razão social
+      autorizacao: statusNormalizado,  // Status preparado para ficar vermelho
+      valorDoDoc: cleanCells[6] || "",   // Valor formatado original
+    };
 
-        // 1. Número do Documento arrancado direto da Chave de Acesso (Dígitos 25 a 34)
-        const trechoNumero = chaveReal.substring(25, 34);
-        numeroDocReal = String(parseInt(trechoNumero, 10));
-
-        // 2. Captura o Fornecedor (Começo da linha)
-        fornecedorReal = columns[1] ? limparCampo(columns[1]) : "";
-        if (columns[2] && isNaN(limparCampo(columns[2])) && limparCampo(columns[2]).length > 2) {
-          if (!limparCampo(columns[2]).match(/^[A-Z]{2}$/)) {
-            fornecedorReal += " " + limparCampo(columns[2]);
-          }
-        }
-
-        // 3. Procura a UF (2 letras maiúsculas)
-        for (let i = 1; i < 5; i++) {
-          if (columns[i] && limparCampo(columns[i]).match(/^[A-Z]{2}$/)) {
-            ufReal = limparCampo(columns[i]);
-            break;
-          }
-        }
-
-        // 4. Busca a Data de Emissão (DD/MM/AAAA)
-        const campoData = columns.find(c => limparCampo(c).match(/^\d{2}\/\d{2}\/\d{4}$/));
-        dataReal = campoData ? limparCampo(campoData) : "";
-
-        // 5. Captura o Valor de forma posicional simples perto da chave
-        if (columns[index - 1]) valorReal = limparCampo(columns[index - 1]);
-        if ((!valorReal || valorReal.length > 12) && columns[index - 2]) {
-          valorReal = limparCampo(columns[index - 2]);
-        }
-      }
-    });
-
-    if (chaveReal && chaveReal.length === 44) {
-      extractedData.push({
-        dataTempo: dataReal || "Ver no SIGA",
-        uf: ufReal || "CE",
-        numDoc: numeroDocReal || "NF-e",
-        chave: chaveReal,
-        fornecedor: fornecedorReal || "Fornecedor",
-        autorizacao: "AUTORIZADA",
-        valorDoDoc: valorReal || "0,00",
-      });
+    // Adiciona na lista apenas se a chave tiver o tamanho correto de uma NF-e
+    if (noteData.chave && noteData.chave.length >= 44) {
+      extractedData.push(noteData);
     }
   });
 
